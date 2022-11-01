@@ -12,7 +12,6 @@
 import {
     defaultValue,
     defined,
-    when,
     Credit,
     DeveloperError,
     Event,
@@ -200,7 +199,7 @@ const JapanGSITerrainProvider = function JapanGSITerrainProvider(options = {}) {
 
     this._errorEvent = new Event();
     this._ready = true;
-    this._readyPromise = when.defer();
+    this._readyPromise = Promise.resolve();
     this._rectangles = [];
 
     let credit = defaultValue(options.credit, defaultCredit);
@@ -334,7 +333,7 @@ JapanGSITerrainProvider.prototype
         return this._makeTileData(
             x, y, level, promise, shift, shiftx, shifty, maxLevel,
         ).then((data) => {
-            that._readyPromise = when.resolve(true);
+            that._readyPromise = Promise.resolve(true);
             return data;
         });
     };
@@ -342,106 +341,104 @@ JapanGSITerrainProvider.prototype
 // テキストから
 JapanGSITerrainProvider.prototype
     // eslint-disable-next-line max-params
-    ._makeTextTileData = function _makeTextTileData(
+    ._makeTextTileData = async function _makeTextTileData(
         x, y, level, promise, shift, shiftx, shifty,
     ) {
         const self = this;
-        return when(promise, (data) => {
-            const heightCSV = [];
-            const LF = String.fromCharCode(10);
-            const lines = data.split(LF);
-            for (let i = 0; i < lines.length; i++) {
-                const heights = lines[i].split(',');
-                for (let j = 0; j < heights.length; j++) {
-                    if (heights[j] === 'e') heights[j] = 0;
-                }
-                heightCSV[i] = heights;
+        const data = await promise;
+        const heightCSV = [];
+        const LF = String.fromCharCode(10);
+        const lines = data.split(LF);
+        for (let i = 0; i < lines.length; i++) {
+            const heights = lines[i].split(',');
+            for (let j = 0; j < heights.length; j++) {
+                if (heights[j] === 'e') heights[j] = 0;
             }
-
-            const whm = self._heightmapWidth;
-            const wim = self._demDataWidth;
-            const hmp = new Int16Array(whm * whm);
-
-            for (let y = 0; y < whm; ++y) {
-                for (let x = 0; x < whm; ++x) {
-                    const py = Math.round(
-                        (y / Math.pow(2, shift) / (whm - 1) + shifty)
-                         * (wim - 1),
-                    );
-                    const px = Math.round(
-                        (x / Math.pow(2, shift + 1) / (whm - 1) + shiftx)
-                         * (wim - 1),
-                    );
-
-                    hmp[y * whm + x] = Math.round(heightCSV[py][px]);
-                }
-            }
-
-            return new HeightmapTerrainData({
-                buffer: hmp,
-                width: self._heightmapWidth,
-                height: self._heightmapWidth,
-                structure: self._terrainDataStructure,
-                childTileMask: 15,
-            });
-        });
-    };
-
-// png画像から
-// eslint-disable-next-line max-params
-JapanGSITerrainProvider.prototype._makePngTileData = function _makePngTileData(
-    x, y, level, promise, shift, shiftx, shifty,
-) {
-    const self = this;
-    return when(promise, (img) => {
-        const demDataWidth = self._demDataWidth;
-        const heightmapWidth = self._heightmapWidth;
-        if (!self._canvas) {
-            self._canvas = document.createElement('canvas');
-            self._ctx = self._canvas.getContext('2d');
-            self._canvas.width = demDataWidth;
-            self._canvas.height = demDataWidth;
+            heightCSV[i] = heights;
         }
-        self._ctx.drawImage(img, 0, 0);
-        const { data } = self._ctx.getImageData(
-            0, 0, demDataWidth, demDataWidth,
-        );
-        const result = new Int16Array(heightmapWidth * heightmapWidth);
-        for (let y = 0; y < heightmapWidth; ++y) {
-            for (let x = 0; x < heightmapWidth; ++x) {
+
+        const whm = self._heightmapWidth;
+        const wim = self._demDataWidth;
+        const hmp = new Int16Array(whm * whm);
+
+        for (let y = 0; y < whm; ++y) {
+            for (let x = 0; x < whm; ++x) {
                 const py = Math.round(
-                    (y / Math.pow(2, shift) / (heightmapWidth - 1) + shifty)
-                    * (demDataWidth - 1),
+                    (y / Math.pow(2, shift) / (whm - 1) + shifty)
+                        * (wim - 1),
                 );
                 const px = Math.round(
-                    (x / Math.pow(2, shift + 1) / (heightmapWidth - 1) + shiftx)
-                    * (demDataWidth - 1),
+                    (x / Math.pow(2, shift + 1) / (whm - 1) + shiftx)
+                        * (wim - 1),
                 );
 
-                const idx = ((py * (demDataWidth * 4)) + (px * 4));
-                const r = data[idx + 0];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                let h = 0;
-
-                if (r != 128 || g != 0 || b != 0) {
-                    const d = r * pow2_16 + g * pow2_8 + b;
-                    h = (d < pow2_23) ? d : d - pow2_24;
-                    if (h == -pow2_23)h = 0;
-                    else h *= 0.01;
-                }
-
-                result[y * heightmapWidth + x] = Math.round(h);
+                hmp[y * whm + x] = Math.round(heightCSV[py][px]);
             }
         }
 
         return new HeightmapTerrainData({
-            buffer: result,
+            buffer: hmp,
             width: self._heightmapWidth,
             height: self._heightmapWidth,
             structure: self._terrainDataStructure,
             childTileMask: 15,
         });
+    };
+
+// png画像から
+// eslint-disable-next-line max-params
+JapanGSITerrainProvider.prototype._makePngTileData = async function _makePngTileData(
+    x, y, level, promise, shift, shiftx, shifty,
+) {
+    const self = this;
+    const img = await promise;
+    const demDataWidth = self._demDataWidth;
+    const heightmapWidth = self._heightmapWidth;
+    if (!self._canvas) {
+        self._canvas = document.createElement('canvas');
+        self._ctx = self._canvas.getContext('2d');
+        self._canvas.width = demDataWidth;
+        self._canvas.height = demDataWidth;
+    }
+    self._ctx.drawImage(img, 0, 0);
+    const { data } = self._ctx.getImageData(
+        0, 0, demDataWidth, demDataWidth,
+    );
+    const result = new Int16Array(heightmapWidth * heightmapWidth);
+    for (let y = 0; y < heightmapWidth; ++y) {
+        for (let x = 0; x < heightmapWidth; ++x) {
+            const py = Math.round(
+                (y / Math.pow(2, shift) / (heightmapWidth - 1) + shifty)
+                * (demDataWidth - 1),
+            );
+            const px = Math.round(
+                (x / Math.pow(2, shift + 1) / (heightmapWidth - 1) + shiftx)
+                * (demDataWidth - 1),
+            );
+
+            const idx = ((py * (demDataWidth * 4)) + (px * 4));
+            const r = data[idx + 0];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            let h = 0;
+
+            if (r != 128 || g != 0 || b != 0) {
+                const d = r * pow2_16 + g * pow2_8 + b;
+                h = (d < pow2_23) ? d : d - pow2_24;
+                if (h == -pow2_23)h = 0;
+                else h *= 0.01;
+            }
+
+            result[y * heightmapWidth + x] = Math.round(h);
+        }
+    }
+
+    return new HeightmapTerrainData({
+        buffer: result,
+        width: self._heightmapWidth,
+        height: self._heightmapWidth,
+        structure: self._terrainDataStructure,
+        childTileMask: 15,
     });
 };
 
